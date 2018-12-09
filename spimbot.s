@@ -77,11 +77,28 @@ main:
 ##############################################
   #Begin movment
   #Turn right algorithm
-  infinite_loop:
+  li	$s0, 0
+infinite_loop:
+  bne	$s0, 0, check_for_solve			## s0 == 1 means puzzle is being requested
+  li	$s0, 1
+  la	$t7, puzzle
+  sw	$t7, REQUEST_PUZZLE
 
+check_for_solve:
+  bne	$s1, 1, move_				## s1 == 1 means puzzle is ready
+  la	$t7, puzzle
+  move	$a0, $t7
+  li	$a1, 1
+  li	$a2, 1
+  jal	dfs
+  sw	$v0, solution
+  la	$t7, solution
+  sw	$t7, SUBMIT_SOLUTION
+  li	$s1, 0
+
+move_:
   li $a0, 10  # velocity is 10
   sw $a0, VELOCITY($zero)
-
   # interrupt handler ends
   lw $t0, RIGHT_WALL_SENSOR($0)  #RIGHT_WALL_SENSOR
   beq $t5, 0, end_turn # previous wall was closed
@@ -298,10 +315,10 @@ bonk_interrupt:
     j interrupt_dispatch    # see if other interrupts are waiting
 
 request_puzzle_interrupt:
-	 sw $a1, REQUEST_PUZZLE_ACK($zero)
-   li $t8, 1
-
-	j	interrupt_dispatch
+	 li	$s0, 0
+	 li	$s1, 1
+	 sw	$t0, REQUEST_PUZZLE_ACK
+	 j	interrupt_dispatch
 
 timer_interrupt:
     sw $a1, TIMER_ACK($zero)
