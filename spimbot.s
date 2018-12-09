@@ -17,7 +17,6 @@ TIMER                   = 0xffff001c
 RIGHT_WALL_SENSOR 		= 0xffff0054
 PICK_TREASURE           = 0xffff00e0
 TREASURE_MAP            = 0xffff0058
-MAZE_MAP                = 0xffff0050
 
 REQUEST_PUZZLE          = 0xffff00d0
 SUBMIT_SOLUTION         = 0xffff00d4
@@ -30,8 +29,6 @@ TIMER_ACK               = 0xffff006c
 
 REQUEST_PUZZLE_INT_MASK = 0x800
 REQUEST_PUZZLE_ACK      = 0xffff00d8
-
-
 # struct spim_treasure
 #{
 #    short x;
@@ -44,17 +41,270 @@ REQUEST_PUZZLE_ACK      = 0xffff00d8
 #    unsigned length;
 #    struct spim_treasure treasures[50];
 #};
-.data
+#
 
-#Insert whatever static memory you need here
+.data
+#REQUEST_PUZZLE returns an int array of length 128
+puzzle: .space 512
+solution: .space 4
+ .align 4
+ ddfs:      .word 128
+
+#
+#Put any other static memory you need here
+#
 
 .text
 main:
-	# Insert code here
+  # interrupt set up begin
+    li $t4, 0x8000        #timer interrupt mask
+    or $t4, $t4, 0x1000   #bon interrupt mmask
+    or $t4, $t4, 0x800    #puzzle interrsupt mask
+    or $t4, $t4, 1
+    mtc0 $t4, $12
+  # interrupt setup end
+
+  # initial velocity set up
+    li $t0, 0               # velocity = 0
+    sw $t0, 0xffff0010($0)  # store VELOCITY
+
+  li $t9, 0
+puzzle_solve_loop:
+  beq $t9, 8, puzzles_done
+
+  la $t0, puzzle  # temporarily store address of the puzzle
+  sw $t0, REQUEST_PUZZLE($0)  # put the address of the puzzle in puzzle request
+
+  li $t8, 0 #puzzle wait loop
+  puzzle_not_ready:
+  beq $t8, 1, puzzle_ready
+  j puzzle_not_ready
+  puzzle_ready:
+
+  # Solve Puzzle
+  sub $sp, $sp, 24
+  sw $ra, 0($sp) # save the return
+  sw $t1, 4($sp)
+  sw $v0, 8($sp)
+  sw $a0, 12($sp)
+  sw $a1, 16($sp)
+  sw $a2, 20($sp)
+
+  la $a0, puzzle # tree
+  li  $a1, 1    # i = 1
+  li  $a2, 1    # input = 1
+  jal dfs
+
+  sw $v0, solution($0)
+
+  lw $ra, 0($sp)
+  lw $t1, 4($sp)
+  lw $v0, 8($sp)
+  lw $a0, 12($sp)
+  lw $a1, 16($sp)
+  lw $a2, 20($sp)
+  add $sp, $sp, 24 # restores
+
+
+  la $t7, solution($0)
+  sw $t7, SUBMIT_SOLUTION($0)
+
+  add $t9, $t9, 1
+  j puzzle_solve_loop
+
+puzzles_done:
+
+  #Begin movment
+  #Turn right algorithm
+  infinite_loop:
+
+  li $a0, 10
+  sw $a0, 0xffff0010($zero)
+
+  # interrupt handler ends
+  lw $t0, 0xffff0054($0)  #RIGHT_WALL_SENSOR
+  beq $t5, 0, end_turn # previous wall was closed
+  beq $t0, 1, end_turn #branch if wall to right
+
+  #li $t0, 0 # store the VELOCITY
+  #sw $t0, 0xffff0010($0) # velocity is 0
+
+  li $t1, 90 # 90 degrees to the right
+  sw $t1, 0xffff0014($0)  # schedule turn
+  li $t2, 0 # relative
+  sw $t2, 0xffff0018($0)  # turn begin
+
+  end_turn:
+  move $t5, $t0
+
+  j infinite_loop
     jr      $ra                         #ret
 
 
-# Kernel Text
+    #Get keys function
+
+#Movemnt function defintions
+    go_north:
+              lw $t3, BOT_Y($0)
+              sub $t4, $t3, 10
+
+                li $t0, 270
+                sw $t0, ANGLE($0)
+                li $t1, 1
+                sw $t1, ANGLE_CONTROL($0)
+                li $t0, 1               # velocity = 0
+                sw $t0, 0xffff0010($0)
+
+                pos1:
+                lw $t3, BOT_Y($0)
+                beq $t4, $t3, pos1done
+                j pos1
+                pos1done:
+                li $t0, 0               # velocity = 0
+                sw $t0, 0xffff0010($0)
+
+                jr $ra
+
+    go_east:
+              lw $t3, BOT_X($0)
+              add $t4, $t3, 10
+
+                li $t0, 0
+                sw $t0, ANGLE($0)
+                li $t1, 1
+                sw $t1, ANGLE_CONTROL($0)
+                li $t0, 1               # velocity = 0
+                sw $t0, 0xffff0010($0)
+
+                pos2:
+                lw $t3, BOT_X($0)
+                beq $t4, $t3, pos2done
+                j pos2
+                pos2done:
+                li $t0, 0               # velocity = 0
+                sw $t0, 0xffff0010($0)
+
+                jr $ra
+    go_south:
+              lw $t3, BOT_Y($0)
+              add $t4, $t3, 10
+
+                li $t0, 90
+                sw $t0, ANGLE($0)
+                li $t1, 1
+                sw $t1, ANGLE_CONTROL($0)
+                li $t0, 1               # velocity = 0
+                sw $t0, 0xffff0010($0)
+
+                pos3:
+                lw $t3, BOT_Y($0)
+                beq $t4, $t3, pos3done
+                j pos3
+                pos3done:
+                li $t0, 0               # velocity = 0
+                sw $t0, 0xffff0010($0)
+
+                jr $ra
+    go_west:
+
+              lw $t3, BOT_X($0)
+              sub $t4, $t3, 10
+
+                li $t0, 180
+                sw $t0, ANGLE($0) # angle set
+                li $t1, 1
+                sw $t1, ANGLE_CONTROL($0) # angle push
+                li $t0, 1               # velocity = 0
+                sw $t0, 0xffff0010($0)
+
+                pos4:
+                lw $t3, BOT_X($0)
+                beq $t4, $t3, pos4done
+                j pos4
+                pos4done:
+                li $t0, 0               # velocity = 0
+                sw $t0, 0xffff0010($0)
+
+
+                jr $ra
+
+
+#DFS for solutions to puzzle
+.globl dfs
+dfs:
+sub		$sp, $sp, 16		# STACK STORE
+sw 		$ra, 0($sp)		# Store ra
+sw		$s0, 4($sp)		# s0 = tree
+sw		$s1, 8($sp)		# s1 = i
+sw		$s2, 12($sp)	# s2 = input
+move 	$s0, $a0
+move 	$s1, $a1
+move	$s2, $a2
+
+
+##	if (i >= 127) {
+##		return -1;
+##	}
+
+_dfs_base_case_one:
+blt     $s1, 127, _dfs_base_case_two
+li      $v0, -1
+j _dfs_return
+
+
+##	if (input == tree[i]) {
+##		return 0;
+##	}
+
+_dfs_base_case_two:
+
+mul		$t1, $s1, 4
+add		$t2, $s0, $t1
+lw      $t1, 0($t2)  			# tree[i]
+
+bne     $t1, $s2, _dfs_ret_one
+li      $v0, 0
+j _dfs_return
+
+##	int ret = DFS(tree, 2 * i, input);
+##	if (ret >= 0) {
+##		return ret + 1;
+##	}
+_dfs_ret_one:
+mul		$a1, $s1, 2
+jal 	dfs				##	int ret = DFS(tree, 2 * i, input);
+
+
+blt		$v0, 0, _dfs_ret_two	##	if (ret >= 0)
+
+addi	$v0, 1					##	return ret + 1
+j _dfs_return
+
+##	ret = DFS(tree, 2 * i + 1, input);
+##	if (ret >= 0) {
+##		return ret + 1;
+##	}
+_dfs_ret_two:
+mul		$a1, $s1, 2
+addi	$a1, 1
+jal 	dfs				##	int ret = DFS(tree, 2 * i + 1, input);
+
+
+blt		$v0, 0, _dfs_return		##	if (ret >= 0)
+
+addi	$v0, 1					##	return ret + 1
+j _dfs_return
+
+##	return ret;
+_dfs_return:
+lw 		$ra, 0($sp)
+lw		$s0, 4($sp)
+lw		$s1, 8($sp)
+lw		$s2, 12($sp)
+add		$sp, $sp, 16
+jal     $ra
+
+
 .kdata
 chunkIH:    .space 28
 non_intrpt_str:    .asciiz "Non-interrupt exception\n"
@@ -80,50 +330,59 @@ interrupt_handler:
 
 
 interrupt_dispatch:            # Interrupt:
-        mfc0       $k0, $13        # Get Cause register, again
-        beq        $k0, 0, done        # handled all outstanding interrupts
+    mfc0       $k0, $13        # Get Cause register, again
+    beq        $k0, 0, done        # handled all outstanding interrupts
 
-        and        $a0, $k0, BONK_INT_MASK    # is there a bonk interrupt?
-        bne        $a0, 0, bonk_interrupt
+    and        $a0, $k0, BONK_INT_MASK    # is there a bonk interrupt?
+    bne        $a0, 0, bonk_interrupt
 
-        and        $a0, $k0, TIMER_INT_MASK    # is there a timer interrupt?
-        bne        $a0, 0, timer_interrupt
+    and        $a0, $k0, TIMER_INT_MASK    # is there a timer interrupt?
+    bne        $a0, 0, timer_interrupt
 
-        and 	$a0, $k0, REQUEST_PUZZLE_INT_MASK
-        bne 	$a0, 0, request_puzzle_interrupt
+	and 	$a0, $k0, REQUEST_PUZZLE_INT_MASK
+	bne 	$a0, 0, request_puzzle_interrupt
 
-        li        $v0, PRINT_STRING    # Unhandled interrupt types
-        la        $a0, unhandled_str
-        syscall
-        j    done
+    li        $v0, PRINT_STRING    # Unhandled interrupt types
+    la        $a0, unhandled_str
+    syscall
+    j    done
 
 bonk_interrupt:
-        sw      $v0, BONK_ACK        # acknowledge interrupt
-        j       interrupt_dispatch    # see if other interrupts are waiting
+    sw $a1, BONK_ACK($zero)
+
+    li $t1, 180  # 180 degree turn
+    sw $t1, 0xffff0014($0) # schedule the turn
+    li $t2, 0 # relative
+    sw $t2, 0xffff0018($0) # beign the turn
+
+    j interrupt_dispatch    # see if other interrupts are waiting
 
 request_puzzle_interrupt:
-	sw	$v0, REQUEST_PUZZLE_ACK 	#acknowledge interrupt
-	j	interrupt_dispatch	 # see if other interrupts are waiting
+	 sw $a1, REQUEST_PUZZLE_ACK($zero)
+   li $t8, 1
+
+	j	interrupt_dispatch
 
 timer_interrupt:
-        sw       $v0, TIMER_ACK        # acknowledge interrupt
-        j        interrupt_dispatch    # see if other interrupts are waiting
+    sw $a1, TIMER_ACK($zero)
+
+    j        interrupt_dispatch    # see if other interrupts are waiting
 
 non_intrpt:                # was some non-interrupt
-        li        $v0, PRINT_STRING
-        la        $a0, non_intrpt_str
-        syscall                # print out an error message
-        # fall through to done
+    li        $v0, PRINT_STRING
+    la        $a0, non_intrpt_str
+    syscall                # print out an error message
+    # fall through to done
 
 done:
-        la      $k0, chunkIH
-        lw      $a0, 0($k0)        # Restore saved registers
-        lw      $v0, 4($k0)
+    la      $k0, chunkIH
+    lw      $a0, 0($k0)        # Restore saved registers
+    lw      $v0, 4($k0)
 	lw      $t0, 8($k0)
-        lw      $t1, 12($k0)
-        lw      $t2, 16($k0)
-        lw      $t3, 20($k0)
+    lw      $t1, 12($k0)
+    lw      $t2, 16($k0)
+    lw      $t3, 20($k0)
 .set noat
-        move    $at, $k1        # Restore $at
+    move    $at, $k1        # Restore $at
 .set at
-        eret
+    eret
