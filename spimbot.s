@@ -47,8 +47,10 @@ REQUEST_PUZZLE_ACK      = 0xffff00d8
 #REQUEST_PUZZLE returns an int array of length 128
 puzzle: .space 512
 solution: .space 4
- .align 4
- ddfs:      .word 128
+treasure_struct: .space 404
+
+.align 4
+ddfs:      .word 128
 
 #
 #Put any other static memory you need here
@@ -56,18 +58,24 @@ solution: .space 4
 
 .text
 main:
+##############################################
   # interrupt set up begin
-    li $t4, 0x8000        #timer interrupt mask
-    or $t4, $t4, 0x1000   #bon interrupt mmask
-    or $t4, $t4, 0x800    #puzzle interrsupt mask
+    li $t4, TIMER_INT_MASK        #timer interrupt mask
+    or $t4, $t4, BONK_INT_MASK  #bon interrupt mmask
+    or $t4, $t4, REQUEST_PUZZLE_INT_MASK    #puzzle interrsupt mask
     or $t4, $t4, 1
     mtc0 $t4, $12
   # interrupt setup end
-
+##############################################
+# Treasure map set up
+  la $t0, treasure_struct # load pointer to treasure map
+  sw $t0, TREASURE_MAP($0) # store pointer to treasure map
+##############################################
   # initial velocity set up
     li $t0, 0               # velocity = 0
-    sw $t0, 0xffff0010($0)  # store VELOCITY
-
+    sw $t0, VELOCITY($0)  # store VELOCITY
+##############################################
+  #iterate through to solve puzzles
   li $t9, 0
 puzzle_solve_loop:
   beq $t9, 8, puzzles_done
@@ -113,36 +121,30 @@ puzzle_solve_loop:
   j puzzle_solve_loop
 
 puzzles_done:
-
+#################################################
   #Begin movment
   #Turn right algorithm
   infinite_loop:
 
-  li $a0, 10
-  sw $a0, 0xffff0010($zero)
+  li $a0, 10  # velocity is 10
+  sw $a0, VELOCITY($zero)
 
   # interrupt handler ends
-  lw $t0, 0xffff0054($0)  #RIGHT_WALL_SENSOR
+  lw $t0, RIGHT_WALL_SENSOR($0)  #RIGHT_WALL_SENSOR
   beq $t5, 0, end_turn # previous wall was closed
   beq $t0, 1, end_turn #branch if wall to right
 
-  #li $t0, 0 # store the VELOCITY
-  #sw $t0, 0xffff0010($0) # velocity is 0
-
   li $t1, 90 # 90 degrees to the right
-  sw $t1, 0xffff0014($0)  # schedule turn
+  sw $t1, ANGLE($0)  # schedule turn
   li $t2, 0 # relative
-  sw $t2, 0xffff0018($0)  # turn begin
+  sw $t2, ANGLE_CONTROL($0)  # turn begin
 
   end_turn:
   move $t5, $t0
 
   j infinite_loop
     jr      $ra                         #ret
-
-
-    #Get keys function
-
+############################################################
 #Movemnt function defintions
     go_north:
               lw $t3, BOT_Y($0)
@@ -153,7 +155,7 @@ puzzles_done:
                 li $t1, 1
                 sw $t1, ANGLE_CONTROL($0)
                 li $t0, 1               # velocity = 0
-                sw $t0, 0xffff0010($0)
+                sw $t0, VELOCITY($0)
 
                 pos1:
                 lw $t3, BOT_Y($0)
@@ -161,7 +163,7 @@ puzzles_done:
                 j pos1
                 pos1done:
                 li $t0, 0               # velocity = 0
-                sw $t0, 0xffff0010($0)
+                sw $t0, VELOCITY($0)
 
                 jr $ra
 
@@ -174,7 +176,7 @@ puzzles_done:
                 li $t1, 1
                 sw $t1, ANGLE_CONTROL($0)
                 li $t0, 1               # velocity = 0
-                sw $t0, 0xffff0010($0)
+                sw $t0, VELOCITY($0)
 
                 pos2:
                 lw $t3, BOT_X($0)
@@ -182,7 +184,7 @@ puzzles_done:
                 j pos2
                 pos2done:
                 li $t0, 0               # velocity = 0
-                sw $t0, 0xffff0010($0)
+                sw $t0, VELOCITY($0)
 
                 jr $ra
     go_south:
@@ -194,7 +196,7 @@ puzzles_done:
                 li $t1, 1
                 sw $t1, ANGLE_CONTROL($0)
                 li $t0, 1               # velocity = 0
-                sw $t0, 0xffff0010($0)
+                sw $t0, VELOCITY($0)
 
                 pos3:
                 lw $t3, BOT_Y($0)
@@ -202,7 +204,7 @@ puzzles_done:
                 j pos3
                 pos3done:
                 li $t0, 0               # velocity = 0
-                sw $t0, 0xffff0010($0)
+                sw $t0, VELOCITY($0)
 
                 jr $ra
     go_west:
@@ -215,7 +217,7 @@ puzzles_done:
                 li $t1, 1
                 sw $t1, ANGLE_CONTROL($0) # angle push
                 li $t0, 1               # velocity = 0
-                sw $t0, 0xffff0010($0)
+                sw $t0, VELOCITY($0)
 
                 pos4:
                 lw $t3, BOT_X($0)
@@ -223,12 +225,12 @@ puzzles_done:
                 j pos4
                 pos4done:
                 li $t0, 0               # velocity = 0
-                sw $t0, 0xffff0010($0)
+                sw $t0, VELOCITY($0)
 
 
                 jr $ra
 
-
+###################################################################
 #DFS for solutions to puzzle
 .globl dfs
 dfs:
@@ -240,24 +242,17 @@ sw		$s2, 12($sp)	# s2 = input
 move 	$s0, $a0
 move 	$s1, $a1
 move	$s2, $a2
-
-
 ##	if (i >= 127) {
 ##		return -1;
 ##	}
-
 _dfs_base_case_one:
 blt     $s1, 127, _dfs_base_case_two
 li      $v0, -1
 j _dfs_return
-
-
 ##	if (input == tree[i]) {
 ##		return 0;
 ##	}
-
 _dfs_base_case_two:
-
 mul		$t1, $s1, 4
 add		$t2, $s0, $t1
 lw      $t1, 0($t2)  			# tree[i]
@@ -265,7 +260,6 @@ lw      $t1, 0($t2)  			# tree[i]
 bne     $t1, $s2, _dfs_ret_one
 li      $v0, 0
 j _dfs_return
-
 ##	int ret = DFS(tree, 2 * i, input);
 ##	if (ret >= 0) {
 ##		return ret + 1;
@@ -273,13 +267,9 @@ j _dfs_return
 _dfs_ret_one:
 mul		$a1, $s1, 2
 jal 	dfs				##	int ret = DFS(tree, 2 * i, input);
-
-
 blt		$v0, 0, _dfs_ret_two	##	if (ret >= 0)
-
 addi	$v0, 1					##	return ret + 1
 j _dfs_return
-
 ##	ret = DFS(tree, 2 * i + 1, input);
 ##	if (ret >= 0) {
 ##		return ret + 1;
@@ -288,13 +278,9 @@ _dfs_ret_two:
 mul		$a1, $s1, 2
 addi	$a1, 1
 jal 	dfs				##	int ret = DFS(tree, 2 * i + 1, input);
-
-
 blt		$v0, 0, _dfs_return		##	if (ret >= 0)
-
 addi	$v0, 1					##	return ret + 1
 j _dfs_return
-
 ##	return ret;
 _dfs_return:
 lw 		$ra, 0($sp)
@@ -303,8 +289,7 @@ lw		$s1, 8($sp)
 lw		$s2, 12($sp)
 add		$sp, $sp, 16
 jal     $ra
-
-
+########################################################################
 .kdata
 chunkIH:    .space 28
 non_intrpt_str:    .asciiz "Non-interrupt exception\n"
@@ -351,9 +336,9 @@ bonk_interrupt:
     sw $a1, BONK_ACK($zero)
 
     li $t1, 180  # 180 degree turn
-    sw $t1, 0xffff0014($0) # schedule the turn
+    sw $t1, ANGLE($0) # schedule the turn
     li $t2, 0 # relative
-    sw $t2, 0xffff0018($0) # beign the turn
+    sw $t2, ANGLE_CONTROL($0) # beign the turn
 
     j interrupt_dispatch    # see if other interrupts are waiting
 
