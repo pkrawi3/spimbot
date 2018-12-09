@@ -75,53 +75,6 @@ main:
     li $t0, 0               # velocity = 0
     sw $t0, VELOCITY($0)  # store VELOCITY
 ##############################################
-  #iterate through to solve puzzles
-  li $t9, 0
-puzzle_solve_loop:
-  beq $t9, 8, puzzles_done
-
-  la $t0, puzzle  # temporarily store address of the puzzle
-  sw $t0, REQUEST_PUZZLE($0)  # put the address of the puzzle in puzzle request
-
-  li $t8, 0 #puzzle wait loop
-  puzzle_not_ready:
-  beq $t8, 1, puzzle_ready
-  j puzzle_not_ready
-  puzzle_ready:
-
-  # Solve Puzzle
-  sub $sp, $sp, 24
-  sw $ra, 0($sp) # save the return
-  sw $t1, 4($sp)
-  sw $v0, 8($sp)
-  sw $a0, 12($sp)
-  sw $a1, 16($sp)
-  sw $a2, 20($sp)
-
-  la $a0, puzzle # tree
-  li  $a1, 1    # i = 1
-  li  $a2, 1    # input = 1
-  jal dfs
-
-  sw $v0, solution($0)
-
-  lw $ra, 0($sp)
-  lw $t1, 4($sp)
-  lw $v0, 8($sp)
-  lw $a0, 12($sp)
-  lw $a1, 16($sp)
-  lw $a2, 20($sp)
-  add $sp, $sp, 24 # restores
-
-
-  la $t7, solution($0)
-  sw $t7, SUBMIT_SOLUTION($0)
-
-  add $t9, $t9, 1
-  j puzzle_solve_loop
-
-puzzles_done:
-#################################################
   #Begin movment
   #Turn right algorithm
   infinite_loop:
@@ -144,7 +97,9 @@ puzzles_done:
 
   j infinite_loop
     jr      $ra                         #ret
+
 ############################################################
+
 #Movemnt function defintions
     go_north:
               lw $t3, BOT_Y($0)
