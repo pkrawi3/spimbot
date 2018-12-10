@@ -100,7 +100,7 @@ infinite_loop:
 	beq	$s5, 1, request_puzzle			#s5 = 1 means timer interrupt has been received and its time to solve a puzzle
 	beq	$s6, 1, move_				#s6 = 1 means timer interrupt has been set
 	lw	$s7, TIMER
-	add	$s7, $s7, 60000
+	add	$s7, $s7, 60000				#change this number to decrease or increase time between puzzle solves
 	sw	$s7, TIMER
 	li	$s6, 1
 	j	move_
