@@ -44,6 +44,7 @@ REQUEST_PUZZLE_ACK      = 0xffff00d8
 #
 
 .data
+PRINT_INT_ADDR = 0xffff0080
 #REQUEST_PUZZLE returns an int array of length 128
 puzzle: .space 512
 solution: .word 1
@@ -58,6 +59,7 @@ ddfs:      .word 128
 
 .text
 main:
+
 ##############################################
 
   # interrupt set up begin
@@ -88,8 +90,20 @@ main:
 	li	$s0, 0
 	li	$s1, 0
 	li	$s2, 0
+	li	$s3, 1
+	li	$s4, 0
+	li	$s5, 1
+	li	$s6, 0
 
 infinite_loop:
+
+	beq	$s5, 1, request_puzzle			#s5 = 1 means timer interrupt has been received and its time to solve a puzzle
+	beq	$s6, 1, move_				#s6 = 1 means timer interrupt has been set
+	lw	$s7, TIMER
+	add	$s7, $s7, 60000
+	sw	$s7, TIMER
+	li	$s6, 1
+	j	move_
 
 request_puzzle:
 	bne	$s0, 0, solve_puzzle			#s0 == 1 means request has been sent
@@ -100,6 +114,8 @@ request_puzzle:
 
 solve_puzzle:
 	bne	$s1, 1, move_
+	li 	$t0, 0  # velocity is 10
+	sw 	$t0, VELOCITY($zero)
 	add	$s2, $s2, 1
 	la	$t7, puzzle
 	move	$a0, $t7
@@ -112,22 +128,25 @@ submit:
 	sw	$t7, SUBMIT_SOLUTION
 	li	$s1, 0
 	li	$s2, 0
+	li	$s5, 0
 
 move_:
-	li 	$a0, 10  # velocity is 10
-	sw 	$a0, VELOCITY($zero)
-	# interrupt handler ends
-	lw 	$t0, RIGHT_WALL_SENSOR($0)  #RIGHT_WALL_SENSOR
-	beq 	$t5, 0, end_turn # previous wall was closed
-	beq 	$t0, 1, end_turn #branch if wall to right
+	li 	$t0, 10  # velocity is 10
+	sw 	$t0, VELOCITY($zero)
 
-	li 	$t1, 90 # 90 degrees to the right
-	sw 	$t1, ANGLE($0)  # schedule turn
-	li 	$t2, 0 # relative
-	sw 	$t2, ANGLE_CONTROL($0)  # turn begin
+	lw 	$s4, RIGHT_WALL_SENSOR($zero)  #RIGHT_WALL_SENSOR
+	move    $v0, $s4
+	sw 	$s4, PRINT_INT_ADDR
+	beq 	$s4, 1, end_turn 	#branch if wall to right
+	beq 	$s3, 0, end_turn 	#previous wall was open
+
+	li 	$s5, 90 # 90 degrees to the right
+	sw 	$s5, ANGLE($0)  	# schedule turn
+	li 	$s6, 0 # relative
+	sw 	$s6, ANGLE_CONTROL($0)  # turn begin
 
 	end_turn:
-	move $t5, $t0
+	move $s3, $s4
 
 	j infinite_loop
 	jr      $ra                         #ret
@@ -413,9 +432,10 @@ request_puzzle_interrupt:
 	 j	interrupt_dispatch
 
 timer_interrupt:
-    sw $a1, TIMER_ACK($zero)
-
-    j        interrupt_dispatch    # see if other interrupts are waiting
+    	sw 	$a1, TIMER_ACK($zero)
+	li	$s5, 1
+	li	$s6, 0
+    	j        interrupt_dispatch    # see if other interrupts are waiting
 
 non_intrpt:                # was some non-interrupt
     li        $v0, PRINT_STRING
