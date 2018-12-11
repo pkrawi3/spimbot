@@ -14,7 +14,7 @@ BOT_Y                   = 0xffff0024
 
 TIMER                   = 0xffff001c
 
-RIGHT_WALL_SENSOR 		= 0xffff0054
+RIGHT_WALL_SENSOR 	= 0xffff0054
 PICK_TREASURE           = 0xffff00e0
 TREASURE_MAP            = 0xffff0058
 
@@ -42,457 +42,291 @@ REQUEST_PUZZLE_ACK      = 0xffff00d8
 #    struct spim_treasure treasures[50];
 #};
 #
-
 .data
+PRINT_INT_ADDR = 0xffff0080
 #REQUEST_PUZZLE returns an int array of length 128
 puzzle: .space 512
-puzzle_solved: .space 512
-solution: .space 4
+solution: .word 1
 treasure_struct: .space 404
-
 .align 4
 ddfs:      .word 128
-
 #
 #Put any other static memory you need here
 #
-
 .text
 main:
 ##############################################
   # interrupt set up begin
-    li $t4, TIMER_INT_MASK        #timer interrupt mask
-    or $t4, $t4, BONK_INT_MASK  #bon interrupt mmask
-    or $t4, $t4, REQUEST_PUZZLE_INT_MASK    #puzzle interrsupt mask
+    li $t4, TIMER_INT_MASK				#timer interrupt mask
+    or $t4, $t4, BONK_INT_MASK  			#bon interrupt mmask
+    or $t4, $t4, REQUEST_PUZZLE_INT_MASK    		#puzzle interrupt mask
     or $t4, $t4, 1
     mtc0 $t4, $12
-  # interrupt setup end
 ##############################################
-# Treasure map set up
-  la $t0, treasure_struct # load pointer to treasure map
-  sw $t0, TREASURE_MAP($0) # store pointer to treasure map
+# Treasure map set up begin
+  la $t0, treasure_struct 				# load pointer to treasure map
+  sw $t0, TREASURE_MAP($0) 				# store pointer to treasure map
 ##############################################
   # initial velocity set up
-    li $t0, 0               # velocity = 0
-    sw $t0, VELOCITY($0)  # store VELOCITY
+    li $t0, 0               				# velocity = 0
+    sw $t0, VELOCITY($0)  				# store VELOCITY
 ##############################################
-  #iterate through to solve puzzles
-  li $t9, 0
-puzzle_solve_loop:
-  beq $t9, 1, puzzles_done
+	li	$s0, 0
+	li	$s1, 0
+	li	$s2, 0
+	li	$s3, 1
+	li	$s4, 0
+	li	$s5, 1
+	li	$s6, 0
 
-  la $t0, puzzle  # temporarily store address of the puzzle
-  sw $t0, REQUEST_PUZZLE($0)  # put the address of the puzzle in puzzle request
+infinite_loop:
 
-  li $t8, 0 #puzzle wait loop
-  puzzle_not_ready:
-  beq $t8, 1, puzzle_ready
-  j puzzle_not_ready
-  puzzle_ready:
+	beq	$s5, 1, request_puzzle			#s5 = 1 means timer interrupt has been received and its time to solve a puzzle
+	beq	$s6, 1, move_				#s6 = 1 means timer interrupt has been set
+	lw	$s7, TIMER
+	add	$s7, $s7, 80000				#change this number to decrease or increase time between puzzle solves
+	sw	$s7, TIMER
+	li	$s6, 1
+	j	move_
 
-  # Solve Puzzle
-  sub $sp, $sp, 36
-  sw $ra, 0($sp) # save the return
-  sw $t1, 4($sp)
-  sw $v0, 8($sp)
-  sw $a0, 12($sp)
-  sw $a1, 16($sp)
-  sw $a2, 20($sp)
-  sw $t0, 24($sp)
-  sw $t8, 28($sp)
-  sw $t9, 32($sp)
+request_puzzle:
+	bne	$s0, 0, solve_puzzle			#s0 == 1 means request has been sent
+	la	$t7, puzzle
+	beq	$s1, 1, solve_puzzle			#s1 == 1 means puzzle is ready
+	sw	$t7, REQUEST_PUZZLE
+	li	$s0, 1
 
-  #loop until not changed
-  la $a0, puzzle # tree
-changed:
+solve_puzzle:
+	bne	$s1, 1, move_
+	li 	$t0, 0  # velocity is 10
+	sw 	$t0, VELOCITY($zero)
+	add	$s2, $s2, 1
+	la	$t7, puzzle
+	move	$a0, $t7
+	jal 	rule1
+	beq	$s2, 3, submit
+	j	solve_puzzle
 
-  beq $v0, 0, notchanged
+submit:
+	la	$t7, puzzle
+	sw	$t7, SUBMIT_SOLUTION
+	li	$s1, 0
+	li	$s2, 0
+	li	$s5, 0
 
-  jal rule1
+move_:
+	li 	$t0, 10  # velocity is 10
+	sw 	$t0, VELOCITY($zero)
 
-  j changed
-notchanged:
+	lw 	$s4, RIGHT_WALL_SENSOR($zero)  #RIGHT_WALL_SENSOR
+	move    $v0, $s4
+	sw 	$s4, PRINT_INT_ADDR
+	beq 	$s4, 1, end_turn 	#branch if wall to right
+	beq 	$s3, 0, end_turn 	#previous wall was open
 
-  sw $a0, solution($0)
+	li 	$s5, 90 # 90 degrees to the right
+	sw 	$s5, ANGLE($0)  	# schedule turn
+	li 	$s6, 0 # relative
+	sw 	$s6, ANGLE_CONTROL($0)  # turn begin
 
-  lw $ra, 0($sp)
-  lw $t1, 4($sp)
-  lw $v0, 8($sp)
-  lw $a0, 12($sp)
-  lw $a1, 16($sp)
-  lw $a2, 20($sp)
-  lw $t0, 24($sp)
-  lw $t8, 28($sp)
-  lw $t9, 32($sp)
-  add $sp, $sp, 36 # restores
+ end_turn:
+    move $s3, $s4
 
+#########################################
+# Treasure Location Check:
 
-  lw $t7, solution($0)
-  sw $t7, SUBMIT_SOLUTION($0)
-
-  add $t9, $t9, 1
-  j puzzle_solve_loop
-
-puzzles_done:
-# #################################################
-#   #Begin movment
-  infinite_loop:
-
-##########################33
-#Turn right algorithm
-  li $a0, 10  # velocity is 10
-  sw $a0, VELOCITY($zero)
-  # interrupt handler ends
-  lw $t0, RIGHT_WALL_SENSOR($0)  #RIGHT_WALL_SENSOR
-  beq $t8, 0, end_turn # previous wall was closed
-  beq $t0, 1, end_turn #branch if wall to right
-
-  li $t1, 90 # 90 degrees to the right
-  sw $t1, ANGLE($0)  # schedule turn
-  li $t2, 0 # relative
-  sw $t2, ANGLE_CONTROL($0)  # turn begin
-
-  end_turn:
-  move $t8, $t0
-################################
-
-  la $t2, treasure_struct
-  #Treasure location check
-  lw $t0, 0($t2)# get length
-  # set up treasure[0]
-  add $t2, $t2, 4 # skip over unsigned
-  #loop over length
-  li $t1, 0     # i=0
-  treasure_loop:
-  beq $t1, $t0, treasures_checked
-
-  lhu $t3, 0($t2) # get i-pos
-  mul $t3, $t3, 10 # x pos
-
-  add $t2, $t2, 2
-
-  lhu $t4, 0($t2) # get j-pos
-  mul $t4, $t4, 10 # y pos
-
-  lw $t5, BOT_X($0) # bot x pos
-  lw $t6, BOT_Y($0) # bot y pos
-
-  sub $t5, $t5, $t3 # x - xbot == 0?
-  sub $t6, $t6, $t4 # y - ybot == 0?
-
-  add $t2, $t2, 6 # skip over int for now
-  add $t1, $t1, 1    # i++
-
-  bne $t5, 0, cond_fail         # condition checks for treasure location
-  bne $t6, 0, cond_fail
-
-  sw $t0, PICK_TREASURE($0) # pick up treasure
-  li $t1, 0 # velocity = 0
-  sw $t1, VELOCITY($0)
-  inf_test:
-  j inf_test
-
-  cond_fail:            # not in position of treasure
-  j treasure_loop
-
-  treasures_checked:
-
- ###########################
-
-  j infinite_loop
-    jr      $ra                         #ret
-############################################################
-#Movemnt function defintions
-    go_north:
-              lw $t3, BOT_Y($0)
-              sub $t4, $t3, 10
-
-                li $t0, 270
-                sw $t0, ANGLE($0)
-                li $t1, 1
-                sw $t1, ANGLE_CONTROL($0)
-                li $t0, 1               # velocity = 0
-                sw $t0, VELOCITY($0)
-
-                pos1:
-                lw $t3, BOT_Y($0)
-                beq $t4, $t3, pos1done
-                j pos1
-                pos1done:
-                li $t0, 0               # velocity = 0
-                sw $t0, VELOCITY($0)
-
-                jr $ra
-
-    go_east:
-              lw $t3, BOT_X($0)
-              add $t4, $t3, 10
-
-                li $t0, 0
-                sw $t0, ANGLE($0)
-                li $t1, 1
-                sw $t1, ANGLE_CONTROL($0)
-                li $t0, 1               # velocity = 0
-                sw $t0, VELOCITY($0)
-
-                pos2:
-                lw $t3, BOT_X($0)
-                beq $t4, $t3, pos2done
-                j pos2
-                pos2done:
-                li $t0, 0               # velocity = 0
-                sw $t0, VELOCITY($0)
-
-                jr $ra
-    go_south:
-              lw $t3, BOT_Y($0)
-              add $t4, $t3, 10
-
-                li $t0, 90
-                sw $t0, ANGLE($0)
-                li $t1, 1
-                sw $t1, ANGLE_CONTROL($0)
-                li $t0, 1               # velocity = 0
-                sw $t0, VELOCITY($0)
-
-                pos3:
-                lw $t3, BOT_Y($0)
-                beq $t4, $t3, pos3done
-                j pos3
-                pos3done:
-                li $t0, 0               # velocity = 0
-                sw $t0, VELOCITY($0)
-
-                jr $ra
-    go_west:
-
-              lw $t3, BOT_X($0)
-              sub $t4, $t3, 10
-
-                li $t0, 180
-                sw $t0, ANGLE($0) # angle set
-                li $t1, 1
-                sw $t1, ANGLE_CONTROL($0) # angle push
-                li $t0, 1               # velocity = 0
-                sw $t0, VELOCITY($0)
-
-                pos4:
-                lw $t3, BOT_X($0)
-                beq $t4, $t3, pos4done
-                j pos4
-                pos4done:
-                li $t0, 0               # velocity = 0
-                sw $t0, VELOCITY($0)
+      la $t2, treasure_struct
+      #Treasure location check
+      lw $t0, 0($t2)# get length
+      # set up treasure[0]
+      add $t2, $t2, 4 # skip over unsigned
 
 
-                jr $ra
+# loop over length
+      li $t1, 0     # i=0
+ treasure_loop:
+      beq $t1, $t0, treasures_checked
+
+      lhu $t3, 0($t2) # get i-pos
+      mul $t3, $t3, 10 # x pos
+
+      add $t2, $t2, 2
+
+      lhu $t4, 0($t2) # get j-pos
+      mul $t4, $t4, 10 # y pos
+
+      lw $t5, BOT_X($0) # bot x pos
+      lw $t6, BOT_Y($0) # bot y pos
+
+      sub $t5, $t5, $t3 # x - xbot == 0?
+      sub $t6, $t6, $t4 # y - ybot == 0?
+
+      add $t2, $t2, 6 # skip over int for now
+      add $t1, $t1, 1    # i++
+
+      bne $t5, 0, cond_fail         # condition checks for treasure location
+      bne $t6, 0, cond_fail
+
+      li $t1, 0 # velocity = 0
+      sw $t1, VELOCITY($0)
+      sw $t0, PICK_TREASURE($0) # pick up treasure
+
+ #inf_test: # temporary
+      #j inf_test # temporary
+      li $t1, 10
+      sw $t1, VELOCITY($0)
+
+ cond_fail:            # not in position of treasure
+      j treasure_loop
+
+ treasures_checked:
+
+    #########################################
+    li $t1, 0
+    pick_up:
+    beq $t1, 100, move_on
+    add $t1, $t1, 1
+    j pick_up
+    move_on:
+
+	j infinite_loop
+	jr      $ra                         #ret
 
 ###################################################################
-#RULE 1
-.globl rule1
-rule1:
-	li  $v0, 0			# bool changed = false
-
-	li  $t0, 0			# i = 0
-	li  $t2, 16			# GRID_SQUARED = 16, i,j,k max
-
-
-loop_one_start:
-	beq $t0, $t2, loop_one_end	# i == 16
-
-	li $t1, 0			#j = 0
-loop_two_start:
-	beq $t1, $t2, loop_two_end	# j == 16
-
-	mul $t3, $t0, 16		# i * N
-	add $t3, $t3, $t1		# (i * N) + j
-	mul $t3, $t3, 2			# ((i * N) + j) * 2
-	add $t3, $t3, $a0		# full address
-
-	lhu $t3, 0($t3) 		# value = board[i][j]
-
-	sub $sp, $sp 24
-	sw $ra, 0($sp)
-	sw $a0, 4($sp)
-	sw $a1, 8($sp)			# STORES
-	sw $v0, 12($sp)
-
-	move $a0, $t3			# set value as argument
-	jal has_single_bit_set	# call has_single_bit
-	move $t7, $v0			# has single bit value return
-
-	lw $ra, 0($sp)
-	lw $a0, 4($sp)
-	lw $a1, 8($sp)			# LOADS
-	lw $v0, 12($sp)
-	add $sp, $sp, 24
-
-	beq $t7, $0, condition_single_bit	#first conditional (single_bit_return == 0):jump
-
-
-	li $t4, 0			# k = 0
-loop_three_start:
-	beq $t4, $t2, loop_three_end	# k == 16
-
-
-	beq $t4, $t1, condition_k_not_j # k != j
-
-	mul $t5, $t0, 16		# i * N		temporarily use t5 as board[i][k] address
-	add $t5, $t5, $t4		# (i * N) + k
-	mul $t5, $t5, 2			# ((i * N) + k) * 2
-	add $t5, $t5, $a0		# full address
-	lhu $t8, 0($t5)			# load in board		temporarily use t8 as board[i][k]
-
-	and $t6, $t8, $t3		# board[i][k] & value	temporarily use t6 as board[i][k] & value
-	beq $t6, $0, condition_k_not_j
-
-	not $t6, $t3			# store ~value
-	and $t6, $t6, $t8		# board[i][k] & ~value
-
-	sh $t6, 0($t5)			# store into the board
-
-	li $v0, 1			# change = true
-
-condition_k_not_j:
-
-	beq $t4, $t0, condition_k_not_i	# k != i
-
-	mul $t5, $t4, 16		# k * N		temporarily use t5 as board[k][j] address
-	add $t5, $t5, $t1		# (k * N) + j
-	mul $t5, $t5, 2			# ((k * N) + j) * 2
-	add $t5, $t5, $a0		# full address
-	lhu $t8, 0($t5)			# load in board		temporarily use t8 as board[k][j]
-
-	and $t6, $t8, $t3		# board[k][j] & value
-	beq $t6, $0, condition_k_not_i
-
-	not $t6, $t3			# store ~value
-	and $t6, $t6, $t8		# board[i][k] & ~value
-
-	sh $t6, 0($t5)			# store into the board
-
-	li $v0, 1				# change = true
-
-condition_k_not_i:
-
-	add $t4, $t4, 1				# k ++
-	j   loop_three_start		# k loop
-loop_three_end:
-
-	sub $sp, $sp, 12			# ii begin
-	sw $ra, 0($sp)
-	sw $a0, 4($sp)
-	sw $v0, 8($sp)
-
-	move $a0, $t0
-	jal get_square_begin			# ii = get_square_begin
-	move $t8, $v0
-
-	lw $ra, 0($sp)
-	lw $a0, 4($sp)
-	lw $v0, 8($sp)
-	add $sp, $sp, 12		# ii end
-
-	sub $sp, $sp 12			# jj begin
-	sw $ra, 0($sp)
-	sw $a0, 4($sp)
-	sw $v0, 8($sp)
-
-	move $a0, $t1
-	jal get_square_begin			# jj = get_square_begin
-	move $t9, $v0
-
-	lw $ra, 0($sp)
-	lw $a0, 4($sp)
-	lw $v0, 8($sp)
-	add $sp, $sp, 12		# jj end
-
-	sub $sp, $sp, 8
-	sw $s0, 0($sp)
-	sw $s1, 4($sp)
-
-	move $s0, $t8
-	move $s1, $t9
-
-
-	move $t5, $s0			# k = ii
-	add $s0, $s0, 4		# iimax = ii + 4
-
-loop_four_start:
-	beq $t5, $s0, loop_four_end
-
-	move $t6, $s1			# l = jj
-	add $t9, $s1, 4		# jjmax = jj + 4
-
-loop_five_start:
-	beq $t6, $t9, loop_five_end
-
-
-							#t4, t7, t8 free to use
-	sub $t7, $t5, $t0			# store k - i
-	bne $t7, $0, k_ij_condition_fail	# conditional cannot be true if k - i != 0
-
-	sub $t8, $t6, $t1			# store l - j
-	bne $t8, $0, k_ij_condition_fail	# conditional cannot be true if l - j != 0
-
-	j continue_skip				# if conditional is true we skip
-
-k_ij_condition_fail:
-
-	mul $t4, $t5, 16		# k * N		temporarily use t4 as board[k][l] address
-	add $t4, $t4, $t6		# (k * N) + l
-	mul $t4, $t4, 2			# ((k * N) + l) * 2
-	add $t4, $t4, $a0		# full address
-	lhu $t7, 0($t4)			# load in board		temporarily use t7 as board[k][l]
-
-	and $t8, $t7, $t3		# board[k][l] & value
-	beq $t8, $0, continue_skip	# condition fails if  board & value are equal to zero
-
-	not $t8, $t3			# flip value and store in t8
-	and $t8, $t7, $t8		# board & ~value
-
-	sh $t8, 0($t4)
-
-	li $v0, 1			#changes = true
-
-continue_skip:
-
-	add $t6, $t6, 1
-	j loop_five_start
-loop_five_end:
-
-	add $t5, $t5, 1
-	j loop_four_start
-loop_four_end:
-
-	lw $s0, 0($sp)
-	lw $s1, 4($sp)
-	add $sp, $sp, 8
-
-condition_single_bit:
-
-	add $t1, $t1, 1			# j ++
-	j   loop_two_start		# j loop
-loop_two_end:
-
-	add $t0, $t0, 1			# i++
-	j   loop_one_start		# i loop
-loop_one_end:
-
+###################################################################
+board_address:
+	mul	$v0, $a1, 16		# i*16
+	add	$v0, $v0, $a2		# (i*16)+j
+	sll	$v0, $v0, 1		# ((i*9)+j)*2
+	add	$v0, $a0, $v0
 	jr	$ra
 
+.globl rule1
+rule1:
+	sub	$sp, $sp, 32
+	sw	$ra, 0($sp)		# save $ra and free up 7 $s registers for
+	sw	$s0, 4($sp)		# i
+	sw	$s1, 8($sp)		# j
+	sw	$s2, 12($sp)		# board
+	sw	$s3, 16($sp)		# value
+	sw	$s4, 20($sp)		# k
+	sw	$s5, 24($sp)		# changed
+	sw	$s6, 28($sp)		# temp
+	move	$s2, $a0		# store the board base address
+	li	$s5, 0			# changed = false
 
-############## LAB 8 HELPERS
+	li	$s0, 0			# i = 0
+r1_loop1:
+	li	$s1, 0			# j = 0
+r1_loop2:
+	move	$a0, $s2		# board
+	move 	$a1, $s0		# i
+	move	$a2, $s1		# j
+	jal	board_address
+	lhu	$s3, 0($v0)		# value = board[i][j]
+	move	$a0, $s3
+	jal	has_single_bit_set
+	beq	$v0, 0, r1_loop2_bot	# if not a singleton, we can go onto the next iteration
+
+	li	$s4, 0			# k = 0
+r1_loop3:
+	beq	$s4, $s1, r1_skip_row	# skip if (k == j)
+	move	$a0, $s2		# board
+	move 	$a1, $s0		# i
+	move	$a2, $s4		# k
+	jal	board_address
+	lhu	$t0, 0($v0)		# board[i][k]
+	and	$t1, $t0, $s3
+	beq	$t1, 0, r1_skip_row
+	not	$t1, $s3
+	and	$t1, $t0, $t1
+	sh	$t1, 0($v0)		# board[i][k] = board[i][k] & ~value
+	li	$s5, 1			# changed = true
+
+r1_skip_row:
+	beq	$s4, $s0, r1_skip_col	# skip if (k == i)
+	move	$a0, $s2		# board
+	move 	$a1, $s4		# k
+	move	$a2, $s1		# j
+	jal	board_address
+	lhu	$t0, 0($v0)		# board[k][j]
+	and	$t1, $t0, $s3
+	beq	$t1, 0, r1_skip_col
+	not	$t1, $s3
+	and	$t1, $t0, $t1
+	sh	$t1, 0($v0)		# board[k][j] = board[k][j] & ~value
+	li	$s5, 1			# changed = true
+
+r1_skip_col:
+	add	$s4, $s4, 1		# k ++
+	blt	$s4, 16, r1_loop3
+
+	## doubly nested loop
+	move	$a0, $s0		# i
+	jal	get_square_begin
+	move	$s6, $v0		# ii
+	move	$a0, $s1		# j
+	jal	get_square_begin	# jj
+
+	move 	$t0, $s6		# k = ii
+	add	$t1, $t0, 4		# ii + GRIDSIZE
+	add 	$s6, $v0, 4		# jj + GRIDSIZE
+
+r1_loop4_outer:
+	sub	$t2, $s6, 4		# l = jj  (= jj + GRIDSIZE - GRIDSIZE)
+
+r1_loop4_inner:
+	bne	$t0, $s0, r1_loop4_1
+	beq	$t2, $s1, r1_loop4_bot
+
+r1_loop4_1:
+	mul	$v0, $t0, 16		# k*16
+	add	$v0, $v0, $t2		# (k*16)+l
+	sll	$v0, $v0, 1		# ((k*16)+l)*2
+	add	$v0, $s2, $v0		# &board[k][l]
+	lhu	$v1, 0($v0)		# board[k][l]
+   	and	$t3, $v1, $s3		# board[k][l] & value
+	beq	$t3, 0, r1_loop4_bot
+
+	not	$t3, $s3
+	and	$v1, $v1, $t3
+	sh	$v1, 0($v0)		# board[k][l] = board[k][l] & ~value
+	li	$s5, 1			# changed = true
+
+r1_loop4_bot:
+	add	$t2, $t2, 1		# l++
+	blt	$t2, $s6, r1_loop4_inner
+
+	add	$t0, $t0, 1		# k++
+	blt	$t0, $t1, r1_loop4_outer
+
+
+r1_loop2_bot:
+	add	$s1, $s1, 1		# j ++
+	blt	$s1, 16, r1_loop2
+
+	add	$s0, $s0, 1		# i ++
+	blt	$s0, 16, r1_loop1
+
+	move	$v0, $s5		# return changed
+	lw	$ra, 0($sp)		# restore registers and return
+	lw	$s0, 4($sp)
+	lw	$s1, 8($sp)
+	lw	$s2, 12($sp)
+	lw	$s3, 16($sp)
+	lw	$s4, 20($sp)
+	lw	$s5, 24($sp)
+	lw	$s6, 28($sp)
+	add	$sp, $sp, 32
+	jr	$ra
+
 .globl get_square_begin
 get_square_begin:
-	# round down to the nearest multiple of 4
 	div	$v0, $a0, 4
 	mul	$v0, $v0, 4
 	jr	$ra
 
 
-# UNTIL THE SOLUTIONS ARE RELEASED, YOU SHOULD COPY OVER YOUR VERSION FROM LAB 7
-# (feel free to copy over the solution afterwards)
 .globl has_single_bit_set
 has_single_bit_set:
 	beq	$a0, 0, hsbs_ret_zero	# return 0 if value == 0
@@ -503,6 +337,78 @@ has_single_bit_set:
 	jr	$ra
 hsbs_ret_zero:
 	li	$v0, 0
+	jr	$ra
+
+
+get_lowest_set_bit:
+	li	$v0, 0			# i
+	li	$t1, 1
+
+glsb_loop:
+	sll	$t2, $t1, $v0		# (1 << i)
+	and	$t2, $t2, $a0		# (value & (1 << i))
+	bne	$t2, $0, glsb_done
+	add	$v0, $v0, 1
+	blt	$v0, 16, glsb_loop	# repeat if (i < 16)
+
+	li	$v0, 0			# return 0
+glsb_done:
+	jr	$ra
+
+
+.globl print_board
+print_board:
+	sub	$sp, $sp, 20
+	sw	$ra, 0($sp)		# save $ra and free up 4 $s registers for
+	sw	$s0, 4($sp)		# i
+	sw	$s1, 8($sp)		# j
+	sw	$s2, 12($sp)		# the function argument
+	sw	$s3, 16($sp)		# the computed pointer (which is used for 2 calls)
+	move	$s2, $a0
+
+	li	$s0, 0			# i
+pb_loop1:
+	li	$s1, 0			# j
+pb_loop2:
+	mul	$t0, $s0, 16		# i*16
+	add	$t0, $t0, $s1		# (i*16)+j
+	sll	$t0, $t0, 1		# ((i*16)+j)*2
+	add	$s3, $s2, $t0
+	lhu	$a0, 0($s3)
+	jal	has_single_bit_set
+	beq	$v0, 0, pb_star		# if it has more than one bit set, jump
+	lhu	$a0, 0($s3)
+	jal	get_lowest_set_bit	#
+	add	$v0, $v0, 1		# $v0 = num
+	la	$t0, symbollist
+	add	$a0, $v0, $t0		# &symbollist[num]
+	lb	$a0, 0($a0)		#  symbollist[num]
+	li	$v0, 11
+	syscall
+	j	pb_cont
+
+pb_star:
+	li	$v0, 11			# print a "*"
+	li	$a0, '*'
+	syscall
+
+pb_cont:
+	add	$s1, $s1, 1		# j++
+	blt	$s1, 16, pb_loop2
+
+	li	$v0, 11			# at the end of a line, print a newline char.
+	li	$a0, '\n'
+	syscall
+
+	add	$s0, $s0, 1		# i++
+	blt	$s0, 16, pb_loop1
+
+	lw	$ra, 0($sp)		# restore registers and return
+	lw	$s0, 4($sp)
+	lw	$s1, 8($sp)
+	lw	$s2, 12($sp)
+	lw	$s3, 16($sp)
+	add	$sp, $sp, 20
 	jr	$ra
 
 ########################################################################
@@ -559,15 +465,16 @@ bonk_interrupt:
     j interrupt_dispatch    # see if other interrupts are waiting
 
 request_puzzle_interrupt:
-	 sw $a1, REQUEST_PUZZLE_ACK($zero)
-   li $t8, 1
-
-	j	interrupt_dispatch
+	 li	$s0, 0
+	 li	$s1, 1
+	 sw	$t0, REQUEST_PUZZLE_ACK
+	 j	interrupt_dispatch
 
 timer_interrupt:
-    sw $a1, TIMER_ACK($zero)
-
-    j        interrupt_dispatch    # see if other interrupts are waiting
+    	sw 	$a1, TIMER_ACK($zero)
+	li	$s5, 1
+	li	$s6, 0
+    	j        interrupt_dispatch    # see if other interrupts are waiting
 
 non_intrpt:                # was some non-interrupt
     li        $v0, PRINT_STRING
