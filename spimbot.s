@@ -84,7 +84,7 @@ infinite_loop:
 	beq	$s5, 1, request_puzzle			#s5 = 1 means timer interrupt has been received and its time to solve a puzzle
 	beq	$s6, 1, move_				#s6 = 1 means timer interrupt has been set
 	lw	$s7, TIMER
-	add	$s7, $s7, 80000				#change this number to decrease or increase time between puzzle solves
+	add	$s7, $s7, 1000000				#change this number to decrease or increase time between puzzle solves
 	sw	$s7, TIMER
 	li	$s6, 1
 	j	move_
@@ -118,79 +118,72 @@ move_:
 	li 	$t0, 10  # velocity is 10
 	sw 	$t0, VELOCITY($zero)
 
-	lw 	$s4, RIGHT_WALL_SENSOR($zero)  #RIGHT_WALL_SENSOR
-	move    $v0, $s4
-	sw 	$s4, PRINT_INT_ADDR
-	beq 	$s4, 1, end_turn 	#branch if wall to right
+	lw 	$t0, RIGHT_WALL_SENSOR($zero)  #RIGHT_WALL_SENSOR
+	beq 	$t0, 1, end_turn 	#branch if wall to right
 	beq 	$s3, 0, end_turn 	#previous wall was open
 
-	li 	$s5, 90 # 90 degrees to the right
-	sw 	$s5, ANGLE($0)  	# schedule turn
-	li 	$s6, 0 # relative
-	sw 	$s6, ANGLE_CONTROL($0)  # turn begin
+	li 	$t1, 90 # 90 degrees to the right
+	sw 	$t1, ANGLE($0)  	# schedule turn
+	li 	$t2, 0 # relative
+	sw 	$t2, ANGLE_CONTROL($0)  # turn begin
 
  end_turn:
-    move $s3, $s4
+    	move 	$s3, $t0
 
 #########################################
 # Treasure Location Check:
 
-      la $t2, treasure_struct
-      #Treasure location check
-      lw $t0, 0($t2)# get length
-      # set up treasure[0]
-      add $t2, $t2, 4 # skip over unsigned
+	la 	$t2, treasure_struct
+	#Treasure location check
+	lw 	$t0, 0($t2)# get length
+	# set up treasure[0]
+	add 	$t2, $t2, 4 # skip over unsigned
 
 
-# loop over length
-      li $t1, 0     # i=0
- treasure_loop:
-      beq $t1, $t0, treasures_checked
+	# loop over length
+	li 	$t1, 0     # i=0
+treasure_loop:
+	beq 	$t1, $t0, infinite_loop
 
-      lhu $t3, 0($t2) # get i-pos
-      mul $t3, $t3, 10 # x pos
+	lhu 	$t3, 0($t2) # get i-pos
 
-      add $t2, $t2, 2
+	add 	$t2, $t2, 2
 
-      lhu $t4, 0($t2) # get j-pos
-      mul $t4, $t4, 10 # y pos
+	lhu 	$t4, 0($t2) # get j-pos
 
-      lw $t5, BOT_X($0) # bot x pos
-      lw $t6, BOT_Y($0) # bot y pos
+	lw 	$t5, BOT_X($0) # bot x pos
+	div	$t5, $t5, 10
+	lw	$t6, BOT_Y($0) # bot y pos
+	div	$t6, $t6, 10
 
-      sub $t5, $t5, $t3 # x - xbot == 0?
-      sub $t6, $t6, $t4 # y - ybot == 0?
+	sub 	$t5, $t5, $t3 # x - xbot == 0?
+	sub 	$t6, $t6, $t4 # y - ybot == 0?
 
-      add $t2, $t2, 6 # skip over int for now
-      add $t1, $t1, 1    # i++
+	add 	$t2, $t2, 6 # skip over int for now
+	add 	$t1, $t1, 1    # i++
 
-      bne $t5, 0, cond_fail         # condition checks for treasure location
-      bne $t6, 0, cond_fail
+	bne 	$t5, 0, cond_fail         # condition checks for treasure location
+	bne 	$t6, 0, cond_fail
 
-      li $t1, 0 # velocity = 0
-      sw $t1, VELOCITY($0)
-      sw $t0, PICK_TREASURE($0) # pick up treasure
+	lw	$t5, TIMER($zero)
+	sub	$t5, $t5, $s4
+	blt	$t5, 100000, cond_fail
 
- #inf_test: # temporary
-      #j inf_test # temporary
-      li $t1, 10
-      sw $t1, VELOCITY($0)
+	li 	$t5, 0 # velocity = 0
+	sw 	$t5, VELOCITY($0)
+	sw 	$t0, PICK_TREASURE($0) # pick up treasure
+	lw	$s4, TIMER($zero)
+
+	#inf_test: # temporary
+	#j inf_test # temporary
+	li 	$t5, 10
+	sw 	$t5, VELOCITY($0)
 
  cond_fail:            # not in position of treasure
       j treasure_loop
 
- treasures_checked:
 
-    #########################################
-    li $t1, 0
-    pick_up:
-    beq $t1, 100, move_on
-    add $t1, $t1, 1
-    j pick_up
-    move_on:
-
-	j infinite_loop
-	jr      $ra                         #ret
+########################################################
 
 ###################################################################
 ###################################################################
