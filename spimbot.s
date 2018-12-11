@@ -46,6 +46,7 @@ REQUEST_PUZZLE_ACK      = 0xffff00d8
 .data
 #REQUEST_PUZZLE returns an int array of length 128
 puzzle: .space 512
+puzzle_solved: .space 512
 solution: .space 4
 treasure_struct: .space 404
 
@@ -78,7 +79,7 @@ main:
   #iterate through to solve puzzles
   li $t9, 0
 puzzle_solve_loop:
-  beq $t9, 8, puzzles_done
+  beq $t9, 1, puzzles_done
 
   la $t0, puzzle  # temporarily store address of the puzzle
   sw $t0, REQUEST_PUZZLE($0)  # put the address of the puzzle in puzzle request
@@ -90,20 +91,29 @@ puzzle_solve_loop:
   puzzle_ready:
 
   # Solve Puzzle
-  sub $sp, $sp, 24
+  sub $sp, $sp, 36
   sw $ra, 0($sp) # save the return
   sw $t1, 4($sp)
   sw $v0, 8($sp)
   sw $a0, 12($sp)
   sw $a1, 16($sp)
   sw $a2, 20($sp)
+  sw $t0, 24($sp)
+  sw $t8, 28($sp)
+  sw $t9, 32($sp)
 
+  #loop until not changed
   la $a0, puzzle # tree
-  li  $a1, 1    # i = 1
-  li  $a2, 1    # input = 1
-  jal dfs
+changed:
 
-  sw $v0, solution($0)
+  beq $v0, 0, notchanged
+
+  jal rule1
+
+  j changed
+notchanged:
+
+  sw $a0, solution($0)
 
   lw $ra, 0($sp)
   lw $t1, 4($sp)
@@ -111,27 +121,30 @@ puzzle_solve_loop:
   lw $a0, 12($sp)
   lw $a1, 16($sp)
   lw $a2, 20($sp)
-  add $sp, $sp, 24 # restores
+  lw $t0, 24($sp)
+  lw $t8, 28($sp)
+  lw $t9, 32($sp)
+  add $sp, $sp, 36 # restores
 
 
-  la $t7, solution($0)
+  lw $t7, solution($0)
   sw $t7, SUBMIT_SOLUTION($0)
 
   add $t9, $t9, 1
   j puzzle_solve_loop
 
 puzzles_done:
-#################################################
-  #Begin movment
-  #Turn right algorithm
+# #################################################
+#   #Begin movment
   infinite_loop:
 
+##########################33
+#Turn right algorithm
   li $a0, 10  # velocity is 10
   sw $a0, VELOCITY($zero)
-
   # interrupt handler ends
   lw $t0, RIGHT_WALL_SENSOR($0)  #RIGHT_WALL_SENSOR
-  beq $t5, 0, end_turn # previous wall was closed
+  beq $t8, 0, end_turn # previous wall was closed
   beq $t0, 1, end_turn #branch if wall to right
 
   li $t1, 90 # 90 degrees to the right
@@ -140,7 +153,51 @@ puzzles_done:
   sw $t2, ANGLE_CONTROL($0)  # turn begin
 
   end_turn:
-  move $t5, $t0
+  move $t8, $t0
+################################
+
+  la $t2, treasure_struct
+  #Treasure location check
+  lw $t0, 0($t2)# get length
+  # set up treasure[0]
+  add $t2, $t2, 4 # skip over unsigned
+  #loop over length
+  li $t1, 0     # i=0
+  treasure_loop:
+  beq $t1, $t0, treasures_checked
+
+  lhu $t3, 0($t2) # get i-pos
+  mul $t3, $t3, 10 # x pos
+
+  add $t2, $t2, 2
+
+  lhu $t4, 0($t2) # get j-pos
+  mul $t4, $t4, 10 # y pos
+
+  lw $t5, BOT_X($0) # bot x pos
+  lw $t6, BOT_Y($0) # bot y pos
+
+  sub $t5, $t5, $t3 # x - xbot == 0?
+  sub $t6, $t6, $t4 # y - ybot == 0?
+
+  add $t2, $t2, 6 # skip over int for now
+  add $t1, $t1, 1    # i++
+
+  bne $t5, 0, cond_fail         # condition checks for treasure location
+  bne $t6, 0, cond_fail
+
+  sw $t0, PICK_TREASURE($0) # pick up treasure
+  li $t1, 0 # velocity = 0
+  sw $t1, VELOCITY($0)
+  inf_test:
+  j inf_test
+
+  cond_fail:            # not in position of treasure
+  j treasure_loop
+
+  treasures_checked:
+
+ ###########################
 
   j infinite_loop
     jr      $ra                         #ret
@@ -231,64 +288,223 @@ puzzles_done:
                 jr $ra
 
 ###################################################################
-#DFS for solutions to puzzle
-.globl dfs
-dfs:
-sub		$sp, $sp, 16		# STACK STORE
-sw 		$ra, 0($sp)		# Store ra
-sw		$s0, 4($sp)		# s0 = tree
-sw		$s1, 8($sp)		# s1 = i
-sw		$s2, 12($sp)	# s2 = input
-move 	$s0, $a0
-move 	$s1, $a1
-move	$s2, $a2
-##	if (i >= 127) {
-##		return -1;
-##	}
-_dfs_base_case_one:
-blt     $s1, 127, _dfs_base_case_two
-li      $v0, -1
-j _dfs_return
-##	if (input == tree[i]) {
-##		return 0;
-##	}
-_dfs_base_case_two:
-mul		$t1, $s1, 4
-add		$t2, $s0, $t1
-lw      $t1, 0($t2)  			# tree[i]
+#RULE 1
+.globl rule1
+rule1:
+	li  $v0, 0			# bool changed = false
 
-bne     $t1, $s2, _dfs_ret_one
-li      $v0, 0
-j _dfs_return
-##	int ret = DFS(tree, 2 * i, input);
-##	if (ret >= 0) {
-##		return ret + 1;
-##	}
-_dfs_ret_one:
-mul		$a1, $s1, 2
-jal 	dfs				##	int ret = DFS(tree, 2 * i, input);
-blt		$v0, 0, _dfs_ret_two	##	if (ret >= 0)
-addi	$v0, 1					##	return ret + 1
-j _dfs_return
-##	ret = DFS(tree, 2 * i + 1, input);
-##	if (ret >= 0) {
-##		return ret + 1;
-##	}
-_dfs_ret_two:
-mul		$a1, $s1, 2
-addi	$a1, 1
-jal 	dfs				##	int ret = DFS(tree, 2 * i + 1, input);
-blt		$v0, 0, _dfs_return		##	if (ret >= 0)
-addi	$v0, 1					##	return ret + 1
-j _dfs_return
-##	return ret;
-_dfs_return:
-lw 		$ra, 0($sp)
-lw		$s0, 4($sp)
-lw		$s1, 8($sp)
-lw		$s2, 12($sp)
-add		$sp, $sp, 16
-jal     $ra
+	li  $t0, 0			# i = 0
+	li  $t2, 16			# GRID_SQUARED = 16, i,j,k max
+
+
+loop_one_start:
+	beq $t0, $t2, loop_one_end	# i == 16
+
+	li $t1, 0			#j = 0
+loop_two_start:
+	beq $t1, $t2, loop_two_end	# j == 16
+
+	mul $t3, $t0, 16		# i * N
+	add $t3, $t3, $t1		# (i * N) + j
+	mul $t3, $t3, 2			# ((i * N) + j) * 2
+	add $t3, $t3, $a0		# full address
+
+	lhu $t3, 0($t3) 		# value = board[i][j]
+
+	sub $sp, $sp 24
+	sw $ra, 0($sp)
+	sw $a0, 4($sp)
+	sw $a1, 8($sp)			# STORES
+	sw $v0, 12($sp)
+
+	move $a0, $t3			# set value as argument
+	jal has_single_bit_set	# call has_single_bit
+	move $t7, $v0			# has single bit value return
+
+	lw $ra, 0($sp)
+	lw $a0, 4($sp)
+	lw $a1, 8($sp)			# LOADS
+	lw $v0, 12($sp)
+	add $sp, $sp, 24
+
+	beq $t7, $0, condition_single_bit	#first conditional (single_bit_return == 0):jump
+
+
+	li $t4, 0			# k = 0
+loop_three_start:
+	beq $t4, $t2, loop_three_end	# k == 16
+
+
+	beq $t4, $t1, condition_k_not_j # k != j
+
+	mul $t5, $t0, 16		# i * N		temporarily use t5 as board[i][k] address
+	add $t5, $t5, $t4		# (i * N) + k
+	mul $t5, $t5, 2			# ((i * N) + k) * 2
+	add $t5, $t5, $a0		# full address
+	lhu $t8, 0($t5)			# load in board		temporarily use t8 as board[i][k]
+
+	and $t6, $t8, $t3		# board[i][k] & value	temporarily use t6 as board[i][k] & value
+	beq $t6, $0, condition_k_not_j
+
+	not $t6, $t3			# store ~value
+	and $t6, $t6, $t8		# board[i][k] & ~value
+
+	sh $t6, 0($t5)			# store into the board
+
+	li $v0, 1			# change = true
+
+condition_k_not_j:
+
+	beq $t4, $t0, condition_k_not_i	# k != i
+
+	mul $t5, $t4, 16		# k * N		temporarily use t5 as board[k][j] address
+	add $t5, $t5, $t1		# (k * N) + j
+	mul $t5, $t5, 2			# ((k * N) + j) * 2
+	add $t5, $t5, $a0		# full address
+	lhu $t8, 0($t5)			# load in board		temporarily use t8 as board[k][j]
+
+	and $t6, $t8, $t3		# board[k][j] & value
+	beq $t6, $0, condition_k_not_i
+
+	not $t6, $t3			# store ~value
+	and $t6, $t6, $t8		# board[i][k] & ~value
+
+	sh $t6, 0($t5)			# store into the board
+
+	li $v0, 1				# change = true
+
+condition_k_not_i:
+
+	add $t4, $t4, 1				# k ++
+	j   loop_three_start		# k loop
+loop_three_end:
+
+	sub $sp, $sp, 12			# ii begin
+	sw $ra, 0($sp)
+	sw $a0, 4($sp)
+	sw $v0, 8($sp)
+
+	move $a0, $t0
+	jal get_square_begin			# ii = get_square_begin
+	move $t8, $v0
+
+	lw $ra, 0($sp)
+	lw $a0, 4($sp)
+	lw $v0, 8($sp)
+	add $sp, $sp, 12		# ii end
+
+	sub $sp, $sp 12			# jj begin
+	sw $ra, 0($sp)
+	sw $a0, 4($sp)
+	sw $v0, 8($sp)
+
+	move $a0, $t1
+	jal get_square_begin			# jj = get_square_begin
+	move $t9, $v0
+
+	lw $ra, 0($sp)
+	lw $a0, 4($sp)
+	lw $v0, 8($sp)
+	add $sp, $sp, 12		# jj end
+
+	sub $sp, $sp, 8
+	sw $s0, 0($sp)
+	sw $s1, 4($sp)
+
+	move $s0, $t8
+	move $s1, $t9
+
+
+	move $t5, $s0			# k = ii
+	add $s0, $s0, 4		# iimax = ii + 4
+
+loop_four_start:
+	beq $t5, $s0, loop_four_end
+
+	move $t6, $s1			# l = jj
+	add $t9, $s1, 4		# jjmax = jj + 4
+
+loop_five_start:
+	beq $t6, $t9, loop_five_end
+
+
+							#t4, t7, t8 free to use
+	sub $t7, $t5, $t0			# store k - i
+	bne $t7, $0, k_ij_condition_fail	# conditional cannot be true if k - i != 0
+
+	sub $t8, $t6, $t1			# store l - j
+	bne $t8, $0, k_ij_condition_fail	# conditional cannot be true if l - j != 0
+
+	j continue_skip				# if conditional is true we skip
+
+k_ij_condition_fail:
+
+	mul $t4, $t5, 16		# k * N		temporarily use t4 as board[k][l] address
+	add $t4, $t4, $t6		# (k * N) + l
+	mul $t4, $t4, 2			# ((k * N) + l) * 2
+	add $t4, $t4, $a0		# full address
+	lhu $t7, 0($t4)			# load in board		temporarily use t7 as board[k][l]
+
+	and $t8, $t7, $t3		# board[k][l] & value
+	beq $t8, $0, continue_skip	# condition fails if  board & value are equal to zero
+
+	not $t8, $t3			# flip value and store in t8
+	and $t8, $t7, $t8		# board & ~value
+
+	sh $t8, 0($t4)
+
+	li $v0, 1			#changes = true
+
+continue_skip:
+
+	add $t6, $t6, 1
+	j loop_five_start
+loop_five_end:
+
+	add $t5, $t5, 1
+	j loop_four_start
+loop_four_end:
+
+	lw $s0, 0($sp)
+	lw $s1, 4($sp)
+	add $sp, $sp, 8
+
+condition_single_bit:
+
+	add $t1, $t1, 1			# j ++
+	j   loop_two_start		# j loop
+loop_two_end:
+
+	add $t0, $t0, 1			# i++
+	j   loop_one_start		# i loop
+loop_one_end:
+
+	jr	$ra
+
+
+############## LAB 8 HELPERS
+.globl get_square_begin
+get_square_begin:
+	# round down to the nearest multiple of 4
+	div	$v0, $a0, 4
+	mul	$v0, $v0, 4
+	jr	$ra
+
+
+# UNTIL THE SOLUTIONS ARE RELEASED, YOU SHOULD COPY OVER YOUR VERSION FROM LAB 7
+# (feel free to copy over the solution afterwards)
+.globl has_single_bit_set
+has_single_bit_set:
+	beq	$a0, 0, hsbs_ret_zero	# return 0 if value == 0
+	sub	$a1, $a0, 1
+	and	$a1, $a0, $a1
+	bne	$a1, 0, hsbs_ret_zero	# return 0 if (value & (value - 1)) == 0
+	li	$v0, 1
+	jr	$ra
+hsbs_ret_zero:
+	li	$v0, 0
+	jr	$ra
+
 ########################################################################
 .kdata
 chunkIH:    .space 28
